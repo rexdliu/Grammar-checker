@@ -19,33 +19,32 @@ warnings.filterwarnings("ignore")
 
 # --- GPU设备配置 ---
 def setup_device():
-    if not torch.cuda.is_available():
-        raise RuntimeError("GPU not available! This system requires CUDA for optimal performance.")
-
-    device = "cuda"
-    torch.cuda.empty_cache()
-    print(f"Using GPU: {torch.cuda.get_device_name()}")
-    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    return device
-
-
+    if torch.cuda.is_available():
+        device = "cuda"
+        torch.cuda.empty_cache()
+        print(f"Using GPU: {torch.cuda.get_device_name()}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        return device
+    else:
+        print("Using CPU")
+        return "cpu"
 DEVICE = setup_device()
 
 # --- 优化模型配置 ---
 MODEL_OPTIONS = {
     "T5-Base (Vennify)": {
         "name": "vennify/t5-base-grammar-correction",
-        "prefix": "grammar: ",  # 验证的前缀
+        "prefix": "grammar: ",
         "model_type": "AutoModelForSeq2SeqLM",
         "params": {
             "max_length": 128,
-            "num_beams": 5,  # 原模型推荐值
-            "min_length": 1,
+            "num_beams": 4,
             "early_stopping": True,
             "no_repeat_ngram_size": 2,
             "repetition_penalty": 1.1,
             "length_penalty": 1.0,
-            "do_sample": False
+            "do_sample": False,
+            "temperature": 1.0
         },
         "performance": {
             "accuracy": "High",
@@ -58,16 +57,17 @@ MODEL_OPTIONS = {
 
     "Coedit-Large (Grammarly)": {
         "name": "grammarly/coedit-large",
-        "prefix": "Fix grammatical errors in this sentence: ",  # 官方指定前缀
+        "prefix": "Fix the grammar: ",  # 修复前缀
         "model_type": "T5ForConditionalGeneration",
         "params": {
-            "max_length": 256,  # CoEdIT推荐值
-            "num_beams": 5,
+            "max_length": 512,
+            "num_beams": 4,
             "early_stopping": True,
-            "no_repeat_ngram_size": 3,
-            "repetition_penalty": 1.05,
+            "no_repeat_ngram_size": 2,
+            "repetition_penalty": 1.0,  # 降低惩罚
             "length_penalty": 1.0,
-            "do_sample": False
+            "do_sample": True,
+            "temperature": 0.3
         },
         "performance": {
             "accuracy": "Very High",
@@ -80,20 +80,21 @@ MODEL_OPTIONS = {
 
     "FLAN-T5-Large (Pszemraj)": {
         "name": "pszemraj/flan-t5-large-grammar-synthesis",
-        "prefix": "",
+        "prefix": "grammar: ",  # 只保留这一行
         "model_type": "AutoModelForSeq2SeqLM",
         "params": {
-            "max_length": 512,  # 支持更长文本
+            "max_length": 512,
             "num_beams": 4,
             "early_stopping": True,
             "no_repeat_ngram_size": 2,
-            "repetition_penalty": 1.0,  # 避免过度
-            "length_penalty": 0.8,  # 略微偏向简洁
-            "do_sample": False
+            "repetition_penalty": 1.0,
+            "length_penalty": 0.8,
+            "do_sample": True,  # 改为True
+            "temperature": 0.7  # 添加这行
         },
         "performance": {
             "accuracy": "Very High",
-            "speed": "Medium-Slow",
+            "speed": "Slow",
             "memory": "~5GB",
             "strengths": "单次全文纠错，语义完整性，无需前缀",
             "weaknesses": "大文本处理时间长"
@@ -114,7 +115,7 @@ MODEL_OPTIONS = {
             "do_sample": False
         },
         "performance": {
-            "accuracy": "Medium-High",
+            "accuracy": "Medium",
             "speed": "Very Fast",
             "memory": "~1GB",
             "strengths": "轻量化，快速处理，低资源消耗",
@@ -161,6 +162,9 @@ def load_hf_model(model_name: str, model_type: str):
         try:
             tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+            # 确保有pad_token
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
             # 根据模型类型选择不同的加载方式
             if model_type == "T5ForConditionalGeneration":
                 model = T5ForConditionalGeneration.from_pretrained(
@@ -207,7 +211,6 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
     input_text = f"{prefix}{cleaned_text}" if prefix else cleaned_text
 
     try:
-        # 优化的tokenization
         inputs = tokenizer(
             input_text,
             return_tensors="pt",
@@ -215,12 +218,7 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
             max_length=512,
             padding=True,
             add_special_tokens=True
-        )
-
-        # 智能设备分配
-        if "large" not in model_name.lower():
-            inputs = inputs.to(DEVICE)
-
+        ).to(DEVICE)
         with torch.no_grad():
             input_length = inputs.input_ids.shape[1]
 
@@ -319,7 +317,7 @@ def estimate_error_density(text: str) -> float:
 def postprocess_text(corrected_text: str, prefix: str, original_text: str) -> str:
     """移除前缀，格式优化"""
     # 移除前缀
-    if prefix and corrected_text.startswith(prefix):
+    if prefix and corrected_text.lower().startswith(prefix.lower()):
         corrected_text = corrected_text[len(prefix):].strip()
 
     if corrected_text and corrected_text[0].islower():
@@ -1024,6 +1022,6 @@ if __name__ == "__main__":
    # result = master_grammar_check(test_text, "T5-Base (Vennify)")
 
 
-    # 批量测试所有模型（可选）
+    # 批量测试所有模型
     benchmark_results = benchmark_all_models()
     print("测试结果:", benchmark_results )
