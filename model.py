@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-高级英语语法检查系统 - 深度优化版本
-支持GPU强制运行，多模型深度集成，智能冗余消除
-修复LanguageTool初始化问题，提升准确度
+Advanced English Grammar Checking System - Optimized Version
+Supports GPU acceleration, multi-model integration, intelligent redundancy elimination
+Fixed LanguageTool initialization issues, improved accuracy
 """
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, T5ForConditionalGeneration
@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 def setup_device():
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -37,9 +38,10 @@ def setup_device():
         logger.info("Using CPU")
         return torch.device("cpu")
 
+
 DEVICE = setup_device()
 
-# --- 优化模型配置 ---
+# --- Optimized Model Configuration ---
 MODEL_OPTIONS = {
     "T5-Base (Vennify)": {
         "name": "vennify/t5-base-grammar-correction",
@@ -59,18 +61,18 @@ MODEL_OPTIONS = {
             "accuracy": "High",
             "speed": "Fast",
             "memory": "~2GB",
-            "strengths": "基础语法错误，标点符号，快速响应",
-            "weaknesses": "复杂句式重构能力有限"
+            "strengths": "Basic grammar errors, punctuation, fast response",
+            "weaknesses": "Limited complex sentence restructuring ability"
         }
     },
-    # --- 你的微调 BART ---
+    # --- Fine-tuned BART Model ---
     "My BART Fine-tuned": {
         "name": "finetuned_bart_model_agentlans_local",
-        # BART 训练时没用前缀，就留空
+        # BART training didn't use prefix, so leave empty
         "prefix": "",
         "model_type": "AutoModelForSeq2SeqLM",
-        "params": {                # 推理时的生成参数，可先沿用 T5 的
-            "max_length": 128,     # 训练时就是 128
+        "params": {  # Inference generation parameters, using T5 settings initially
+            "max_length": 128,  # Training used 128
             "num_beams": 4,
             "early_stopping": True,
             "no_repeat_ngram_size": 3,
@@ -78,42 +80,50 @@ MODEL_OPTIONS = {
             "length_penalty": 1.0,
             "do_sample": False
         },
-        "performance": {           # 纯备注，可随意写
+        "performance": {  # Documentation only, can be customized
             "accuracy": "Fine-tuned",
             "speed": "Fast",
             "memory": "~2.5GB",
             "strengths": "In-domain corrections",
-            "weaknesses": "May overfit small set"
+            "weaknesses": "May overfit small dataset"
         }
     }
 }
 
-
-# --- 全局实例管理 ---
+# --- Global Instance Management ---
 _language_tool_instance = None
 _spell_checker_instance = None
 loaded_models = {}
-DISABLE_LANGUAGE_TOOL = True 
+DISABLE_LANGUAGE_TOOL = False  # Set to False to enable LanguageTool (Mode 3: LanguageTool + SpellChecker)
+
 
 def get_language_tool_instance():
-    """获取LanguageTool实例 - 直接返回None"""
+    """Get LanguageTool instance with proper initialization"""
     if DISABLE_LANGUAGE_TOOL:
         return None
 
     global _language_tool_instance
     if _language_tool_instance is None:
-        logger.info("LanguageTool已被禁用，使用增强的备用语法检查")
-        return None
+        try:
+            logger.info("Initializing LanguageTool...")
+            _language_tool_instance = language_tool_python.LanguageTool('en-US')
+            logger.info("LanguageTool initialization successful")
+        except Exception as e:
+            logger.error(f"LanguageTool initialization failed: {e}")
+            _language_tool_instance = None
+
     return _language_tool_instance
+
+
 def get_spell_checker_instance():
-    """获取SpellChecker单例，增强错误处理"""
+    """Get SpellChecker singleton with enhanced error handling"""
     global _spell_checker_instance
     if _spell_checker_instance is None:
         try:
-            logger.info("正在初始化SpellChecker...")
+            logger.info("Initializing SpellChecker...")
             _spell_checker_instance = SpellChecker()
 
-            # 添加常见的专业词汇到词典，避免误报
+            # Add common professional vocabulary to dictionary to avoid false positives
             custom_words = {
                 'booktask', 'bookcase', 'textbook', 'workbook',
                 'handbook', 'notebook', 'facebook', 'laptop',
@@ -121,25 +131,25 @@ def get_spell_checker_instance():
             }
             _spell_checker_instance.word_frequency.load_words(custom_words)
 
-            logger.info("SpellChecker初始化成功")
+            logger.info("SpellChecker initialization successful")
         except Exception as e:
-            logger.error(f"SpellChecker初始化失败: {e}")
+            logger.error(f"SpellChecker initialization failed: {e}")
             _spell_checker_instance = None
     return _spell_checker_instance
 
 
 def check_sentence_structure(text: str) -> List[Dict]:
-    """检查句子结构问题"""
+    """Check sentence structure issues"""
     errors = []
 
-    # 检查句子开头大写
+    # Check sentence capitalization
     sentences = re.split(r'[.!?]\s+', text)
     current_pos = 0
 
     for sentence in sentences:
         if sentence and sentence[0].islower():
             errors.append({
-                "message": "句子应该以大写字母开头",
+                "message": "Sentence should start with a capital letter",
                 "replacement": sentence[0].upper() + sentence[1:] if len(sentence) > 1 else sentence.upper(),
                 "offset": current_pos,
                 "length": 1,
@@ -151,12 +161,12 @@ def check_sentence_structure(text: str) -> List[Dict]:
                 "confidence": 0.9,
                 "priority": 50
             })
-        current_pos += len(sentence) + 2  # 加上标点和空格
+        current_pos += len(sentence) + 2  # Add punctuation and space
 
-    # 检查缺少句末标点
+    # Check missing end punctuation
     if text and text[-1] not in '.!?':
         errors.append({
-            "message": "句子末尾缺少标点符号",
+            "message": "Sentence is missing end punctuation",
             "replacement": text + ".",
             "offset": len(text) - 1,
             "length": 1,
@@ -171,12 +181,13 @@ def check_sentence_structure(text: str) -> List[Dict]:
 
     return errors
 
+
 def load_hf_model(model_name: str, model_type: str):
-    """加载并缓存Hugging Face模型，确保设备一致性"""
+    """Load and cache Hugging Face models, ensuring device consistency"""
     if model_name not in loaded_models:
-        logger.info(f"正在加载模型: {model_name} (类型: {model_type})")
+        logger.info(f"Loading model: {model_name} (type: {model_type})")
         try:
-            # 使用缓存目录避免重复下载
+            # Use cache directory to avoid repeated downloads
             cache_dir = os.path.join(os.getcwd(), "model_cache")
             os.makedirs(cache_dir, exist_ok=True)
 
@@ -186,11 +197,11 @@ def load_hf_model(model_name: str, model_type: str):
                 local_files_only=False
             )
 
-            # 确保有pad_token
+            # Ensure pad_token exists
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
 
-            # 根据模型类型和设备选择加载方式
+            # Choose loading method based on model type and device
             if DEVICE == "cuda":
                 if model_type == "T5ForConditionalGeneration":
                     model = T5ForConditionalGeneration.from_pretrained(
@@ -206,7 +217,7 @@ def load_hf_model(model_name: str, model_type: str):
                         torch_dtype=torch.float16
                     ).to(DEVICE)
             else:
-                # CPU模式
+                # CPU mode
                 if model_type == "T5ForConditionalGeneration":
                     model = T5ForConditionalGeneration.from_pretrained(
                         model_name,
@@ -220,16 +231,18 @@ def load_hf_model(model_name: str, model_type: str):
 
             model.eval()
             loaded_models[model_name] = {"tokenizer": tokenizer, "model": model}
-            logger.info(f"模型 {model_name} 加载成功")
+            logger.info(f"Model {model_name} loaded successfully")
 
         except Exception as e:
-            logger.error(f"模型 {model_name} 加载失败: {e}")
+            logger.error(f"Model {model_name} loading failed: {e}")
             return None, None
 
     return loaded_models[model_name]["tokenizer"], loaded_models[model_name]["model"]
-# --- 增强的核心函数 ---
+
+
+# --- Enhanced Core Functions ---
 def correct_grammar_hf(text: str, model_key: str) -> Dict:
-    """使用指定模型进行语法纠错，修复设备不匹配问题"""
+    """Use specified model for grammar correction, fixing device mismatch issues"""
     if model_key not in MODEL_OPTIONS:
         return {"error": "Model configuration not found", "corrected_text": text}
 
@@ -243,12 +256,12 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
     if not tokenizer or not model:
         return {"error": "Model loading failed", "corrected_text": text}
 
-    # 增强预处理
+    # Enhanced preprocessing
     cleaned_text = preprocess_text(text)
     input_text = f"{prefix}{cleaned_text}" if prefix else cleaned_text
 
     try:
-        # 确保tokenizer输出在正确的设备上
+        # Ensure tokenizer output is on correct device
         inputs = tokenizer(
             input_text,
             return_tensors="pt",
@@ -258,17 +271,17 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
             add_special_tokens=True
         )
 
-        # 手动将inputs移到正确的设备
+        # Manually move inputs to correct device
         if DEVICE == "cuda":
             inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
 
         with torch.no_grad():
             input_length = inputs['input_ids'].shape[1]
 
-            # 动态参数调整
+            # Dynamic parameter adjustment
             dynamic_params = adjust_generation_params(params, input_length, text)
 
-            # 确保所有参数都在同一设备上
+            # Ensure all parameters are on same device
             outputs = model.generate(
                 inputs['input_ids'],
                 attention_mask=inputs.get('attention_mask'),
@@ -287,10 +300,10 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
 
         corrected_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # 增强后处理
+        # Enhanced post-processing
         corrected_text = postprocess_text(corrected_text, prefix, text)
 
-        # 智能质量评估
+        # Intelligent quality assessment
         quality_score = assess_correction_quality(text, corrected_text)
 
         return {
@@ -304,105 +317,101 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
         }
 
     except Exception as e:
-        logger.error(f"语法纠错生成失败: {e}")
+        logger.error(f"Grammar correction generation failed: {e}")
         return {"error": f"Generation failed: {str(e)}", "corrected_text": text}
 
 
 def preprocess_text(text: str) -> str:
-    """文本预处理"""
+    """Enhanced text preprocessing"""
     if not text.strip():
         return text
 
-    # 基础清理
+    # Basic cleaning
     text = re.sub(r'\s+', ' ', text.strip())
 
-    # 修复明显的格式问题
-    text = re.sub(r'\s+([,.!?;:])', r'\1', text)  # 标点前空格
-    text = re.sub(r'([.!?])\s*([a-z])', r'\1 \2', text)  # 句子间距
+    # Fix obvious formatting issues
+    text = re.sub(r'\s+([,.!?;:])', r'\1', text)  # Space before punctuation
+    text = re.sub(r'([.!?])\s*([a-z])', r'\1 \2', text)  # Sentence spacing
 
-    # 修复常见的大小写错误
+    # Fix common case errors
     text = re.sub(r'\bi\s+([a-z])', r'I \1', text)  # "i" -> "I"
-    # 修复常见的缩写错误
+
+    # Fix common contraction errors
     text = re.sub(r'\bdont\b', "don't", text, flags=re.IGNORECASE)
     text = re.sub(r'\bcant\b', "can't", text, flags=re.IGNORECASE)
     text = re.sub(r'\bwont\b', "won't", text, flags=re.IGNORECASE)
-    # “Me and him was/were…” → “He and I were…”
-    text = re.sub(
-        r'\bme and him\b', 'I and him', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bme and her\b', 'I and her', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bhim and me\b', 'He and me', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bher and me\b', 'She and me', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bme and them\b', 'I and them', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bme and us\b', 'We', text, flags=re.IGNORECASE)
-    # “Me and my friend” → “My friend and I”
-    text = re.sub(
-        r'\bme and ([a-zA-Z ]+)\b', r'\1 and I', text, flags=re.IGNORECASE)
-    # “Him and my friends” → “He and my friends”
-    text = re.sub(
-        r'\bhim and ([a-zA-Z ]+)\b', r'He and \1', text, flags=re.IGNORECASE)
-    text = re.sub(
-        r'\bher and ([a-zA-Z ]+)\b', r'She and \1', text, flags=re.IGNORECASE)
+
+    # "Me and him was/were…" → "He and I were…"
+    text = re.sub(r'\bme and him\b', 'I and him', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bme and her\b', 'I and her', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bhim and me\b', 'He and me', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bher and me\b', 'She and me', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bme and them\b', 'I and them', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bme and us\b', 'We', text, flags=re.IGNORECASE)
+
+    # "Me and my friend" → "My friend and I"
+    text = re.sub(r'\bme and ([a-zA-Z ]+)\b', r'\1 and I', text, flags=re.IGNORECASE)
+
+    # "Him and my friends" → "He and my friends"
+    text = re.sub(r'\bhim and ([a-zA-Z ]+)\b', r'He and \1', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bher and ([a-zA-Z ]+)\b', r'She and \1', text, flags=re.IGNORECASE)
+
     return text
 
 
 def adjust_generation_params(base_params: Dict, input_length: int, text: str) -> Dict:
-    """智能调整生成参数"""
+    """Intelligently adjust generation parameters"""
     params = base_params.copy()
 
-    # 根据输入长度动态调整max_length
+    # Dynamically adjust max_length based on input length
     if input_length > 100:
         params["max_length"] = min(512, int(input_length * 1.8))
     else:
         params["max_length"] = min(256, max(64, int(input_length * 2.5)))
 
-    # 根据错误密度调整beam数和采样策略
+    # Adjust beam count and sampling strategy based on error density
     error_density = estimate_error_density(text)
-    if error_density > 0.4:  # 高错误密度
+    if error_density > 0.4:  # High error density
         params["num_beams"] = min(params.get("num_beams", 4) + 2, 8)
         params["repetition_penalty"] = max(params.get("repetition_penalty", 1.0), 1.1)
-    elif error_density < 0.1:  # 低错误密度
+    elif error_density < 0.1:  # Low error density
         params["num_beams"] = max(params.get("num_beams", 4) - 1, 2)
 
     return params
 
 
 def estimate_error_density(text: str) -> float:
-    """增强的错误密度估算，专门检测bootkass等明显错误"""
+    """Enhanced error density estimation, specifically detecting obvious errors like 'bootkass'"""
     words = text.split()
     if not words:
         return 0.0
 
     error_indicators = 0
 
-    # 扩展的错误模式检测
+    # Extended error pattern detection
     patterns = [
         r'\bi\s+has\b',  # "I has"
         r'\bdon\'?t\s+has\b',  # "don't has"
-        r'\bhas\s+many\s+\w+s\b',  # 复数错误
-        r'\b[a-z]+ss\b',  # 双s结尾拼写错误
+        r'\bhas\s+many\s+\w+s\b',  # Plural errors
+        r'\b[a-z]+ss\b',  # Double-s ending spelling errors
         r'\btheir\s+going\b',  # "their going"
         r'\bthere\s+\w+ing\b',  # "there going"
-        r'\b\w{4,}kas{1,2}\b',  # 类似bootkass的错误
-        r'\b\w+grammer\b',  # grammar拼写错误
+        r'\b\w{4,}kas{1,2}\b',  # Similar to bootkass errors
+        r'\b\w+grammer\b',  # Grammar spelling errors
         r'\bme\s+and\s+him\b',  # "me and him"
-        r'\bstudients\b',  # students拼写错误
-        r'\bclasroom\b',  # classroom拼写错误
+        r'\bstudients\b',  # Students spelling errors
+        r'\bclasroom\b',  # Classroom spelling errors
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         error_indicators += len(matches)
 
-    # 拼写错误检测
+    # Spelling error detection
     spell_checker = get_spell_checker_instance()
     if spell_checker:
         try:
-            # 过滤掉可能的专有名词
+            # Filter out possible proper nouns
             check_words = [w for w in words if len(w) > 2 and not w[0].isupper()]
             misspelled = spell_checker.unknown(check_words)
             error_indicators += len(misspelled)
@@ -413,44 +422,44 @@ def estimate_error_density(text: str) -> float:
 
 
 def postprocess_text(corrected_text: str, prefix: str, original_text: str) -> str:
-    """增强的后处理"""
+    """Enhanced post-processing"""
     if not corrected_text:
         return original_text
 
-    # 移除前缀
+    # Remove prefix
     if prefix and corrected_text.lower().startswith(prefix.lower()):
         corrected_text = corrected_text[len(prefix):].strip()
 
-    # 智能首字母大写
+    # Smart capitalization
     if corrected_text and corrected_text[0].islower():
         corrected_text = corrected_text[0].upper() + corrected_text[1:]
 
-    # 修复常见的后处理问题
-    corrected_text = re.sub(r'\s+', ' ', corrected_text)  # 多余空格
-    corrected_text = re.sub(r'\s+([,.!?;:])', r'\1', corrected_text)  # 标点前空格
+    # Fix common post-processing issues
+    corrected_text = re.sub(r'\s+', ' ', corrected_text)  # Extra spaces
+    corrected_text = re.sub(r'\s+([,.!?;:])', r'\1', corrected_text)  # Space before punctuation
 
-    # 智能句末标点处理
+    # Smart end punctuation handling
     if corrected_text and not corrected_text[-1] in '.!?':
         if original_text and original_text[-1] in '.!?':
             corrected_text += original_text[-1]
-        elif len(corrected_text.split()) > 3:  # 只为较长句子添加句号
+        elif len(corrected_text.split()) > 3:  # Only add period for longer sentences
             corrected_text += '.'
 
     return corrected_text
 
 
 def assess_correction_quality(original: str, corrected: str) -> Dict:
-    """增强的纠错质量评估"""
+    """Enhanced correction quality assessment"""
     if original == corrected:
         return {"confidence": "low", "score": 0.0}
 
-    # 多维度质量评估
+    # Multi-dimensional quality assessment
     similarity = difflib.SequenceMatcher(None, original, corrected).ratio()
 
-    # 检测修复的具体错误类型
+    # Detect specific error types fixed
     fixes_detected = 0
 
-    # 语法修复检测
+    # Grammar fix detection
     grammar_fixes = [
         (r'\bi\s+has\b', r'\bi\s+have\b'),
         (r'\bdon\'?t\s+has\b', r'\bdon\'?t\s+have\b'),
@@ -462,11 +471,11 @@ def assess_correction_quality(original: str, corrected: str) -> Dict:
                 re.search(fixed_pattern, corrected, re.IGNORECASE):
             fixes_detected += 1
 
-    # 拼写修复检测
+    # Spelling fix detection
     spelling_fixes = [
         (r'\bgrammer\b', r'\bgrammar\b'),
         (r'\bmistakess\b', r'\bmistakes\b'),
-        (r'\bbootkass\b', r'\bbook\w+\b'),  # bootkass修复
+        (r'\bbootkass\b', r'\bbook\w+\b'),  # bootkass fix
         (r'\bstudients\b', r'\bstudents\b'),
         (r'\bclasroom\b', r'\bclassroom\b'),
     ]
@@ -476,7 +485,7 @@ def assess_correction_quality(original: str, corrected: str) -> Dict:
                 re.search(fixed_pattern, corrected, re.IGNORECASE):
             fixes_detected += 1
 
-    # 计算置信度
+    # Calculate confidence
     if fixes_detected >= 2 and similarity > 0.7:
         confidence = "high"
         score = 0.9
@@ -493,20 +502,157 @@ def assess_correction_quality(original: str, corrected: str) -> Dict:
     return {"confidence": confidence, "score": score}
 
 
-# --- 优化的规则引擎系统 ---
+# --- Optimized Rule Engine System ---
 def check_with_language_tool(text: str) -> List[Dict]:
-    """优化的LanguageTool检查 - 现在直接使用增强的备用检查"""
-    return backup_grammar_check(text)
+    """
+    Smart grammar checking with LanguageTool + backup fallback
+
+    Logic:
+    1. If LanguageTool is available, use it
+    2. If LanguageTool fails or is disabled, use backup_grammar_check
+    3. Optionally combine both for comprehensive checking
+    """
+    language_tool = get_language_tool_instance()
+
+    if language_tool is not None:
+        try:
+            logger.info("Using LanguageTool for grammar checking")
+            # Use actual LanguageTool
+            matches = language_tool.check(text)
+            errors = []
+
+            for match in matches:
+                # Skip low-value errors
+                if should_skip_error(match):
+                    continue
+
+                error_dict = {
+                    "message": match.message,
+                    "replacement": match.replacements[0] if match.replacements else "N/A",
+                    "offset": match.offset,
+                    "length": match.errorLength,
+                    "context": match.context,
+                    "rule_id": match.ruleId,
+                    "category": match.category,
+                    "error_type": categorize_error(match.ruleId, match.category),
+                    "severity": get_error_severity(match.ruleId, match.message),
+                    "confidence": calculate_error_confidence(match, text),
+                    "priority": calculate_priority(
+                        get_error_severity(match.ruleId, match.message),
+                        calculate_error_confidence(match, text),
+                        categorize_error(match.ruleId, match.category)
+                    )
+                }
+                errors.append(error_dict)
+
+            # Optionally add backup grammar results for comprehensive checking
+            # Uncomment the next two lines if you want BOTH LanguageTool AND backup
+            # backup_errors = backup_grammar_check(text)
+            # errors.extend(backup_errors)
+
+            return sorted(errors, key=lambda x: x["priority"], reverse=True)
+
+        except Exception as e:
+            logger.error(f"LanguageTool check failed: {e}, falling back to backup")
+            return backup_grammar_check(text)
+    else:
+        logger.info("LanguageTool not available, using backup grammar checking")
+        return backup_grammar_check(text)
+
+def should_skip_error(match):
+    """Determine if an error should be skipped based on its properties."""
+    # Example: Skip errors with specific ruleIds or categories
+    skip_rules = {"MORFOLOGIK_RULE_EN_US", "WHITESPACE_RULE"}
+    if match.ruleId in skip_rules:
+        return True
+    return False
+
+def categorize_error(rule_id, category):
+    """Categorize the error based on ruleId and category."""
+    if rule_id.startswith("MORFOLOGIK_RULE_"):
+        return "Spelling"
+    elif rule_id.startswith("COMMA_") or rule_id.startswith("PUNCTUATION"):
+        return "Punctuation"
+    elif "AGREEMENT" in rule_id or "VERB_NUMBER" in rule_id:
+        return "Grammar"
+    elif "CASE" in rule_id or "PRONOUN" in rule_id:
+        return "Grammar"
+    elif "TENSE" in rule_id:
+        return "Verb Tense"
+    elif "ARTICLE" in rule_id:
+        return "Article"
+    elif "REDUNDANCY" in rule_id:
+        return "Style"
+    else:
+        return category if category else "Other"
+
+def get_error_severity(rule_id, message):
+    """Get the severity of the error based on ruleId and message."""
+    severe_rules = {"EN_A_V", "ENGLISH_WORD_REPEAT_RULE", "UPPERCASE_SENTENCE_START"}
+    moderate_rules = {"MORFOLOGIK_RULE_EN_US", "COMMA_PARENTHESIS_WHITESPACE"}
+
+    if rule_id in severe_rules:
+        return "High"
+    elif rule_id in moderate_rules:
+        return "Medium"
+    else:
+        return "Low"
+
+def calculate_error_confidence(match, text):
+    """Calculate the confidence of the error detection."""
+    # Example: Base confidence on rule type and message clarity
+    base_confidence = 0.8  # Default confidence
+
+    if "MORFOLOGIK" in match.ruleId:
+        base_confidence += 0.1  # Spelling rules are usually very reliable
+
+    if "whitespace" in match.message.lower():
+        base_confidence -= 0.1  # Whitespace rules can be less certain
+
+    return min(max(base_confidence, 0.1), 1.0)  # Clamp between 0.1 and 1.0
+
+def calculate_priority(severity, confidence, error_type):
+    """Calculate the priority of the error based on severity, confidence, and type."""
+    severity_map = {"High": 3, "Medium": 2, "Low": 1}
+    error_type_weights = {"Grammar": 1.5, "Spelling": 1.2, "Punctuation": 1.0, "Style": 0.8}
+
+    severity_score = severity_map.get(severity, 1)
+    type_weight = error_type_weights.get(error_type, 1.0)
+
+    return severity_score * confidence * type_weight * 100  # Scale to a reasonable range
 
 def backup_grammar_check(text: str) -> List[Dict]:
     """Enhanced grammar checking, alternative to LanguageTool"""
     errors = []
 
-    # Extended grammar rules
+    # Extended grammar rules library
     grammar_rules = [
+        # 新增的语法规则示例：处理"techer"到"teacher"的错误
+        {
+            "pattern": r'\btecher\b',
+            "message": "Spelling error: 'techer' should be 'teacher'",
+            "replacement_func": lambda m: "teacher",
+            "severity": "High",
+            "error_type": "Spelling"
+        },
+        # 新增规则：检测并修正"libaray"到"library"
+        {
+            "pattern": r'\blibaray\b',
+            "message": "Spelling error: 'libaray' should be 'library'",
+            "replacement_func": lambda m: "library",
+            "severity": "High",
+            "error_type": "Spelling"
+        },
+        {
+            "pattern": r'\bbootkass\b',
+            "message": "Spelling error: 'bootkass' should be 'bookcase'",
+            "replacement_func": lambda m: "bookcase",
+            "severity": "High",
+            "error_type": "Spelling"
+        },
         # Subject-Verb Agreement Errors
         {
-            "pattern": r'\bi\s+(?:has|was|does|is)\b',
+            "pattern": r'\bi\s+has\b',  
             "message": "Subject-verb disagreement: 'I' should use have/were/do/am",
             "replacement_func": lambda m: re.sub(r'\b(has|was|does|is)\b',
                                                  {'has': 'have', 'was': 'were', 'does': 'do', 'is': 'am'}[m.group(1)],
@@ -514,20 +660,12 @@ def backup_grammar_check(text: str) -> List[Dict]:
             "severity": "High",
             "error_type": "Grammar"
         },
-        {
-            "pattern": r'\bi\s+(?:has|was|does|is)\b',
-            "message": "Subject-verb disagreement: 'He' should use hasn't/doesn't/isn't",
-            "replacement_func": lambda m: re.sub(r'\b(dont|isnot|have)\b',
-                                                 {"dont":'doesnt','isnot':'isn'}[m.group(1)],
-                                                 m.group()),
-            "severity": "High",
-            "error_type": "Grammar"
-        },
-        # Direct addition to grammar_rules:
+        # Pronoun case/order errors
         {
             "pattern": r'\bme and (him|her|them)\b',
             "message": "Pronoun order/case: Use 'I and he/she/they' (or 'He and I', 'She and I' for better flow).",
-            "replacement_func": lambda m: "He and I" if m.group(1) == "him" else ("She and I" if m.group(1) == "her" else "They and I"),
+            "replacement_func": lambda m: "He and I" if m.group(1) == "him" else (
+                "She and I" if m.group(1) == "her" else "They and I"),
             "severity": "High",
             "error_type": "Grammar"
         },
@@ -551,7 +689,7 @@ def backup_grammar_check(text: str) -> List[Dict]:
         # Confused Words
         {
             "pattern": r'\btheir\s+(?:going|coming|leaving)\b',
-            "message": "Lexical error: 'their' should be 'they\'re' (they are)",
+            "message": "Lexical error: 'their' should be 'they're' (they are)",
             "replacement_func": lambda m: m.group().replace('their', "they're"),
             "severity": "High",
             "error_type": "Grammar"
@@ -578,24 +716,24 @@ def backup_grammar_check(text: str) -> List[Dict]:
             "severity": "Medium",
             "error_type": "Grammar"
         },
-        # Common Spelling and Punctuation Errors
+        # Common Spelling and Grammar Mixed Errors
         {
             "pattern": r'\bdont\b',
-            "message": "Missing apostrophe: 'dont' should be 'don\'t'",
+            "message": "Missing apostrophe: 'dont' should be 'don't'",
             "replacement_func": lambda m: "don't",
             "severity": "High",
             "error_type": "Punctuation"
         },
         {
             "pattern": r'\bcant\b',
-            "message": "Missing apostrophe: 'cant' should be 'can\'t'",
+            "message": "Missing apostrophe: 'cant' should be 'can't'",
             "replacement_func": lambda m: "can't",
             "severity": "High",
             "error_type": "Punctuation"
         },
         {
             "pattern": r'\bwont\b',
-            "message": "Missing apostrophe: 'wont' should be 'won\'t'",
+            "message": "Missing apostrophe: 'wont' should be 'won't'",
             "replacement_func": lambda m: "won't",
             "severity": "High",
             "error_type": "Punctuation"
@@ -646,98 +784,21 @@ def backup_grammar_check(text: str) -> List[Dict]:
 
             errors.append(error_dict)
 
-    # Check for sentence structure issues
+    # Check sentence structure issues
     sentence_errors = check_sentence_structure(text)
     errors.extend(sentence_errors)
 
     return sorted(errors, key=lambda x: x["priority"], reverse=True)
-def should_skip_error(match) -> bool:
-    """过滤低价值错误"""
-    skip_rules = [
-        "WHITESPACE_RULE",
-        "WORD_CONTAINS_UNDERSCORE",
-        "EN_QUOTES",
-        "CURRENCY"
-    ]
-
-    skip_categories = ["TYPOS"]  # 纯拼写错误（由拼写检查器处理）
-
-    return (match.ruleId in skip_rules or
-            match.category in skip_categories or
-            len(match.message) < 10)
-
-
-def calculate_error_confidence(match, text: str) -> float:
-    """计算错误检测置信度"""
-    confidence = 0.5  # 基础置信度
-
-    # 基于规则ID的置信度调整
-    high_confidence_rules = ["EN_A_VS_AN", "HE_VERB_AGR", "SUBJECT_VERB_AGR"]
-    medium_confidence_rules = ["COMMA_PARENTHESIS", "UPPERCASE_SENTENCE_START"]
-
-    if any(rule in match.ruleId for rule in high_confidence_rules):
-        confidence += 0.4
-    elif any(rule in match.ruleId for rule in medium_confidence_rules):
-        confidence += 0.2
-
-    # 基于替换建议质量
-    if match.replacements and len(match.replacements) == 1:
-        confidence += 0.1  # 唯一建议更可信
-
-    return min(confidence, 1.0)
-
-
-def categorize_error(rule_id: str, category: str) -> str:
-    """错误类型分类"""
-    if "SPELL" in rule_id.upper() or "MORFOLOGIA" in category.upper():
-        return "Spelling"
-    elif "PUNCT" in rule_id.upper() or "TYPOGRAPHY" in category.upper():
-        return "Punctuation"
-    elif "GRAMMAR" in category.upper() or "MORFOLOGIK" in rule_id.upper():
-        return "Grammar"
-    elif "STYLE" in category.upper():
-        return "Style"
-    else:
-        return "Other"
-
-
-def get_error_severity(rule_id: str, message: str) -> str:
-    """错误严重程度评估"""
-    high_severity = ["MORFOLOGIK_RULE", "EN_A_VS_AN", "HE_VERB_AGR", "SUBJECT_VERB_AGR"]
-    medium_severity = ["COMMA_PARENTHESIS", "UPPERCASE_SENTENCE_START", "WHITESPACE"]
-
-    # 基于规则ID判断
-    if any(h in rule_id for h in high_severity):
-        return "High"
-    elif any(m in rule_id for m in medium_severity):
-        return "Medium"
-
-    # 基于消息内容判断
-    if any(word in message.lower() for word in ["subject", "verb", "agreement", "grammar"]):
-        return "High"
-    elif any(word in message.lower() for word in ["comma", "punctuation", "capital"]):
-        return "Medium"
-    else:
-        return "Low"
-
-
-def calculate_priority(severity: str, confidence: float, error_type: str) -> int:
-    """计算错误处理优先级"""
-    base_score = {"High": 100, "Medium": 50, "Low": 20}[severity]
-    confidence_boost = int(confidence * 30)
-    type_boost = {"Grammar": 20, "Spelling": 15, "Punctuation": 10, "Style": 5}[error_type]
-
-    return base_score + confidence_boost + type_boost
 
 
 def check_spelling_pyspell(text: str) -> List[Dict]:
-    """增强的拼写检查，专门优化bootkass等明显错误"""
+    """Enhanced spelling check, specifically optimized for obvious errors like 'bootkass'"""
     spell = get_spell_checker_instance()
     if not spell:
         return []
 
     try:
-        # 智能词语提取，包含位置信息
+        # Smart word extraction with position information
         words = extract_words_with_positions(text)
         word_list = [w["word"] for w in words]
         misspelled = spell.unknown(word_list)
@@ -748,17 +809,17 @@ def check_spelling_pyspell(text: str) -> List[Dict]:
             if word not in misspelled:
                 continue
 
-            # 跳过明显的专有名词和缩写
+            # Skip obvious proper nouns and abbreviations
             if should_skip_word(word):
                 continue
 
             correction = spell.correction(word)
             candidates = list(spell.candidates(word))[:5]
 
-            # 特殊处理常见错误模式
+            # Special handling for common error patterns
             correction, candidates = handle_special_spelling_cases(word, correction, candidates)
 
-            # 增强的置信度计算
+            # Enhanced confidence calculation
             confidence = calculate_spelling_confidence(word, correction, candidates)
 
             suggestions.append({
@@ -771,21 +832,21 @@ def check_spelling_pyspell(text: str) -> List[Dict]:
                 "priority": calculate_spelling_priority(confidence, len(word))
             })
 
-        # 按优先级排序，确保明显错误排在前面
+        # Sort by priority, ensuring obvious errors come first
         return sorted(suggestions, key=lambda x: x["priority"], reverse=True)
 
     except Exception as e:
-        logger.error(f"增强拼写检查失败: {e}")
+        logger.error(f"Enhanced spelling check failed: {e}")
         return []
 
 
 def handle_special_spelling_cases(word: str, correction: str, candidates: List[str]) -> Tuple[str, List[str]]:
-    """处理特殊拼写错误情况，专门处理bootkass等明显错误"""
+    """Handle special spelling error cases, specifically dealing with obvious errors like 'bootkass'"""
     word_lower = word.lower()
 
-    # 扩展特殊错误模式映射
+    # Extended special error pattern mapping
     special_corrections = {
-        'bootkass': 'bookcase',  # 添加bootkass的专门处理
+        'bootkass': 'bookcase',  # Add special handling for bootkass
         'grammer': 'grammar',
         'writting': 'writing',
         'mistakess': 'mistakes',
@@ -801,38 +862,38 @@ def handle_special_spelling_cases(word: str, correction: str, candidates: List[s
 
     if word_lower in special_corrections:
         special_correction = special_corrections[word_lower]
-        # 保持原始大小写格式
+        # Maintain original case format
         if word[0].isupper():
             special_correction = special_correction.capitalize()
 
-        # 确保特殊修正在候选列表的第一位
+        # Ensure special correction is first in candidate list
         if special_correction not in candidates:
             candidates = [special_correction] + candidates[:4]
         else:
-            # 如果已在列表中，移到第一位
+            # If already in list, move to first position
             candidates.remove(special_correction)
             candidates = [special_correction] + candidates
 
         return special_correction, candidates
 
-    # 处理类似bootkass的模式 (word + kass/kas)
+    # Handle patterns similar to bootkass (word + kass/kas)
     if word_lower.endswith('kass') or word_lower.endswith('kas'):
         base_word = word_lower[:-4] if word_lower.endswith('kass') else word_lower[:-3]
 
-        # 特定处理book相关的错误
+        # Specific handling for book-related errors
         if base_word == 'boot' or base_word == 'book':
             correction = 'bookcase'
             candidates = ['bookcase', 'book', 'books'] + candidates[:2]
             return correction, candidates
 
-        # 其他kass结尾的处理
+        # Other kass-ending handling
         possible_corrections = [
             base_word + 'case',
             base_word + 'class',
             base_word + 's'
         ]
 
-        # 添加到候选列表前面
+        # Add to front of candidate list
         for poss_correction in possible_corrections:
             if poss_correction not in candidates:
                 candidates.insert(0, poss_correction)
@@ -842,8 +903,9 @@ def handle_special_spelling_cases(word: str, correction: str, candidates: List[s
 
     return correction, candidates[:5]
 
+
 def extract_words_with_positions(text: str) -> List[Dict]:
-    """提取单词及其位置信息"""
+    """Extract words with their position information"""
     words = []
     for match in re.finditer(r'\b[a-zA-Z]{2,}\b', text):
         words.append({
@@ -854,14 +916,14 @@ def extract_words_with_positions(text: str) -> List[Dict]:
 
 
 def should_skip_word(word: str) -> bool:
-    """过滤不需要检查的词"""
-    # 跳过过短、全大写（可能是缩写）、包含数字的词
+    """Filter words that don't need checking"""
+    # Skip short, all-caps (possibly abbreviations), or words containing numbers
     if (len(word) < 3 or
             word.isupper() or
             any(c.isdigit() for c in word)):
         return True
 
-    # 跳过常见的缩写和网络用语
+    # Skip common abbreviations and internet slang
     skip_words = {
         'ok', 'hi', 'bye', 'lol', 'omg', 'wtf', 'btw', 'fyi',
         'etc', 'vs', 'ie', 'eg', 'asap', 'faq', 'diy'
@@ -870,7 +932,7 @@ def should_skip_word(word: str) -> bool:
     if word.lower() in skip_words:
         return True
 
-    # 跳过可能的专有名词（首字母大写且长度>5）
+    # Skip possible proper nouns (capitalized and length > 5)
     if word[0].isupper() and len(word) > 5:
         return True
 
@@ -878,22 +940,22 @@ def should_skip_word(word: str) -> bool:
 
 
 def calculate_spelling_confidence(word: str, correction: str, candidates: List[str]) -> float:
-    """计算拼写纠错置信度"""
+    """Calculate spelling correction confidence"""
     if not correction or correction == word:
         return 0.1
 
     confidence = 0.5
 
-    # 基于编辑距离
+    # Based on edit distance
     edit_distance = calculate_edit_distance(word, correction)
     if edit_distance == 1:
-        confidence += 0.3  # 单字符差异，高置信度
+        confidence += 0.3  # Single character difference, high confidence
     elif edit_distance == 2:
         confidence += 0.2
 
-    # 基于候选数量
+    # Based on number of candidates
     if len(candidates) == 1:
-        confidence += 0.2  # 唯一候选
+        confidence += 0.2  # Unique candidate
     elif len(candidates) <= 3:
         confidence += 0.1
 
@@ -901,7 +963,7 @@ def calculate_spelling_confidence(word: str, correction: str, candidates: List[s
 
 
 def calculate_edit_distance(s1: str, s2: str) -> int:
-    """计算编辑距离"""
+    """Calculate edit distance"""
     if len(s1) > len(s2):
         s1, s2 = s2, s1
 
@@ -918,44 +980,44 @@ def calculate_edit_distance(s1: str, s2: str) -> int:
 
 
 def calculate_spelling_priority(confidence: float, word_length: int) -> int:
-    """计算拼写错误优先级"""
+    """Calculate spelling error priority"""
     base_score = int(confidence * 100)
-    length_bonus = min(word_length * 2, 20)  # 长词优先
+    length_bonus = min(word_length * 2, 20)  # Longer words get priority
     return base_score + length_bonus
 
 
 def get_word_context(text: str, position: int, word_length: int) -> str:
-    """获取单词上下文"""
+    """Get word context"""
     start = max(0, position - 20)
     end = min(len(text), position + word_length + 20)
     return text[start:end]
 
 
-# --- 智能反馈融合系统 ---
+# --- Intelligent Feedback Fusion System ---
 def intelligent_feedback_fusion(transformer_result: Dict, lt_errors: List[Dict], spell_errors: List[Dict]) -> Dict:
-    """智能融合Transformer和规则引擎反馈"""
+    """Intelligently fuse Transformer and rule engine feedback"""
 
     original_text = transformer_result.get("original_text", "")
     corrected_text = transformer_result.get("corrected_text", "")
 
-    # 1. 分析Transformer修复的问题
+    # 1. Analyze Transformer fixes
     transformer_fixes = analyze_transformer_fixes(original_text, corrected_text)
 
-    # 2. 过滤已修复的规则引擎错误
+    # 2. Filter resolved rule engine errors
     filtered_lt_errors = filter_resolved_lt_errors(lt_errors, transformer_fixes, corrected_text)
     filtered_spell_errors = filter_resolved_spell_errors(spell_errors, transformer_fixes, corrected_text)
 
-    # 3. 识别Transformer遗漏的问题
+    # 3. Identify Transformer missed issues
     missed_issues = identify_missed_issues(filtered_lt_errors, filtered_spell_errors, corrected_text)
 
-    # 4. 生成融合建议
+    # 4. Generate fusion suggestions
     fusion_suggestions = generate_fusion_suggestions(
         transformer_result, filtered_lt_errors, filtered_spell_errors, missed_issues
     )
 
     return {
         "transformer_result": transformer_result,
-        "filtered_lt_errors": filtered_lt_errors[:5],  # 限制数量
+        "filtered_lt_errors": filtered_lt_errors[:5],  # Limit quantity
         "filtered_spell_errors": filtered_spell_errors[:3],
         "missed_critical_issues": missed_issues,
         "fusion_suggestions": fusion_suggestions,
@@ -964,13 +1026,13 @@ def intelligent_feedback_fusion(transformer_result: Dict, lt_errors: List[Dict],
 
 
 def analyze_transformer_fixes(original: str, corrected: str) -> List[Dict]:
-    """分析Transformer做出的修复"""
+    """Analyze fixes made by Transformer"""
     if original == corrected:
         return []
 
     fixes = []
 
-    # 检测常见修复模式
+    # Detect common fix patterns
     patterns = [
         (r'\bi\s+has\b', r'\bi\s+have\b', "subject_verb_agreement"),
         (r'\bdon\'?t\b', r'\bdon\'t\b', "contraction_fix"),
@@ -991,7 +1053,7 @@ def analyze_transformer_fixes(original: str, corrected: str) -> List[Dict]:
 
 
 def filter_resolved_lt_errors(lt_errors: List[Dict], transformer_fixes: List[Dict], corrected_text: str) -> List[Dict]:
-    """过滤已被Transformer解决的LanguageTool错误"""
+    """Filter LanguageTool errors already resolved by Transformer"""
     filtered = []
 
     for error in lt_errors:
@@ -1002,11 +1064,9 @@ def filter_resolved_lt_errors(lt_errors: List[Dict], transformer_fixes: List[Dic
     return filtered
 
 
-def filter_resolved_spell_errors(
-        spell_errors: List[Dict],
-        transformer_fixes: List[Dict],
-        corrected_text: str
-    ) -> List[Dict]:
+def filter_resolved_spell_errors(spell_errors: List[Dict], transformer_fixes: List[Dict], corrected_text: str) -> List[
+    Dict]:
+    """Filter spelling errors already resolved by Transformer"""
     filtered = []
     lower_corrected = corrected_text.lower()
     for err in spell_errors:
@@ -1018,16 +1078,13 @@ def filter_resolved_spell_errors(
     return filtered
 
 
-globals()["filter_resolved_spell_errors"] = filter_resolved_spell_errors
-
-
 def is_error_resolved(error: Dict, transformer_fixes: List[Dict], corrected_text: str) -> bool:
-    """检查错误是否已被解决"""
-    # 检查建议的修复是否出现在修正文本中
+    """Check if error has been resolved"""
+    # Check if suggested fix appears in corrected text
     if error["replacement"] != "N/A" and error["replacement"].lower() in corrected_text.lower():
         return True
 
-    # 检查是否匹配Transformer修复模式
+    # Check if it matches Transformer fix patterns
     for fix in transformer_fixes:
         if fix["type"] in error["rule_id"].lower():
             return True
@@ -1036,10 +1093,10 @@ def is_error_resolved(error: Dict, transformer_fixes: List[Dict], corrected_text
 
 
 def identify_missed_issues(lt_errors: List[Dict], spell_errors: List[Dict], corrected_text: str) -> List[Dict]:
-    """识别Transformer遗漏的关键问题"""
+    """Identify critical issues missed by Transformer"""
     critical_issues = []
 
-    # 高优先级语法错误
+    # High priority grammar errors
     for error in lt_errors:
         if error["priority"] > 80 and error["confidence"] > 0.7:
             critical_issues.append({
@@ -1049,7 +1106,7 @@ def identify_missed_issues(lt_errors: List[Dict], spell_errors: List[Dict], corr
                 "priority": error["priority"]
             })
 
-    # 高置信度拼写错误
+    # High confidence spelling errors
     for error in spell_errors:
         if error["confidence"] > 0.8:
             critical_issues.append({
@@ -1059,15 +1116,15 @@ def identify_missed_issues(lt_errors: List[Dict], spell_errors: List[Dict], corr
                 "priority": error["priority"]
             })
 
-    return critical_issues[:3]  # 限制为最重要的3个
+    return critical_issues[:3]  # Limit to top 3 most important
 
 
 def generate_fusion_suggestions(transformer_result: Dict, lt_errors: List[Dict],
                                 spell_errors: List[Dict], missed_issues: List[Dict]) -> List[Dict]:
-    """生成融合建议"""
+    """Generate fusion suggestions"""
     suggestions = []
 
-    # Transformer结果作为主要建议
+    # Transformer result as primary suggestion
     if transformer_result.get("changes_made"):
         suggestions.append({
             "type": "primary",
@@ -1077,7 +1134,7 @@ def generate_fusion_suggestions(transformer_result: Dict, lt_errors: List[Dict],
             "priority": 100
         })
 
-    # 关键遗漏问题
+    # Critical missed issues
     for issue in missed_issues:
         suggestions.append({
             "type": "additional",
@@ -1087,12 +1144,12 @@ def generate_fusion_suggestions(transformer_result: Dict, lt_errors: List[Dict],
             "priority": issue["priority"]
         })
 
-    # 按优先级排序
+    # Sort by priority
     return sorted(suggestions, key=lambda x: x["priority"], reverse=True)
 
 
 def calculate_overall_confidence(transformer_result: Dict, lt_errors: List[Dict], spell_errors: List[Dict]) -> str:
-    """计算整体置信度"""
+    """Calculate overall confidence"""
     transformer_conf = transformer_result.get("improvement_score", 0)
     remaining_issues = len(lt_errors) + len(spell_errors)
 
@@ -1104,69 +1161,13 @@ def calculate_overall_confidence(transformer_result: Dict, lt_errors: List[Dict]
         return "low"
 
 
-# --- 智能冗余消除系统 ---
-def remove_redundant_suggestions(transformer_result: Dict, lt_errors: List[Dict], spell_errors: List[Dict]) -> Dict:
-    """智能消除不同工具间的冗余建议"""
-
-    # 分析Transformer已经修复的问题
-    original_text = transformer_result.get("original_text", "")
-    corrected_text = transformer_result.get("corrected_text", "")
-
-    # 过滤已被Transformer修复的LanguageTool错误
-    filtered_lt_errors = []
-    for error in lt_errors:
-        error_span = original_text[error["offset"]:error["offset"] + error["length"]]
-        # 检查这个错误是否已经被修复
-        if error_span.lower() in corrected_text.lower() and error["replacement"].lower() in corrected_text.lower():
-            continue  # 跳过已修复的错误
-        filtered_lt_errors.append(error)
-
-    # 过滤已被Transformer修复的拼写错误
-    filtered_spell_errors = []
-    for error in spell_errors:
-        if error["correction"] and error["correction"].lower() in corrected_text.lower():
-            continue  # 跳过已修复的拼写错误
-        filtered_spell_errors.append(error)
-
-    # 合并并去重建议
-    unique_suggestions = {}
-
-    # 添加高置信度的建议
-    for error in filtered_lt_errors:
-        if error["severity"] == "High":
-            key = f"{error['offset']}_{error['length']}"
-            unique_suggestions[key] = {
-                "type": "grammar",
-                "suggestion": error["replacement"],
-                "reason": error["message"],
-                "priority": "high"
-            }
-
-    for error in filtered_spell_errors:
-        if error["confidence"] == "high":
-            key = f"spell_{error['word']}"
-            unique_suggestions[key] = {
-                "type": "spelling",
-                "suggestion": error["correction"],
-                "reason": f"Misspelled word: {error['word']}",
-                "priority": "medium"
-            }
-
-    return {
-        "transformer_result": transformer_result,
-        "filtered_lt_errors": filtered_lt_errors,
-        "filtered_spell_errors": filtered_spell_errors,
-        "unique_suggestions": list(unique_suggestions.values())
-    }
-
-
-# --- 改进的差异高亮系统 ---
+# --- Improved Difference Highlighting System ---
 def get_highlighted_diff(original_text: str, corrected_text: str) -> List[Tuple]:
-    """生成详细的差异高亮，支持多种变更类型"""
+    """Generate detailed difference highlighting, supporting multiple change types"""
     if not original_text or not corrected_text:
         return [(original_text or corrected_text, None)]
 
-    # 使用字符级和词级混合比较
+    # Use character-level and word-level mixed comparison
     original_words = original_text.split()
     corrected_words = corrected_text.split()
 
@@ -1198,41 +1199,42 @@ def get_highlighted_diff(original_text: str, corrected_text: str) -> List[Tuple]
 
 
 def map_language_tool_errors(text: str, errors: List[Dict]) -> List[Tuple]:
-    """将LanguageTool错误映射到HighlightedText格式"""
+    """Map LanguageTool errors to HighlightedText format"""
     if not errors:
         return [(text, None)]
 
     highlighted_parts = []
     last_end = 0
 
-    # 按偏移量排序
+    # Sort by offset
     sorted_errors = sorted(errors, key=lambda x: x['offset'])
 
     for error in sorted_errors:
         offset = error['offset']
         length = error['length']
 
-        # 添加错误前的正常文本
+        # Add normal text before error
         if offset > last_end:
             highlighted_parts.append((text[last_end:offset], None))
 
-        # 添加错误文本及标签
+        # Add error text with label
         error_text = text[offset:offset + length]
         error_label = f"{error['error_type']} ({error['severity']})"
         highlighted_parts.append((error_text, error_label))
 
         last_end = offset + length
 
-    # 添加剩余文本
+    # Add remaining text
     if last_end < len(text):
         highlighted_parts.append((text[last_end:], None))
 
     return highlighted_parts
 
 
-# --- 主控制函数 ---
+# --- Main Control Function ---
 def master_grammar_check(text_to_check: str, selected_model_key: str,
-                         use_language_tool: bool = False, use_pyspellchecker: bool = True) -> Dict:
+                         use_language_tool: bool = True, use_pyspellchecker: bool = True) -> Dict:
+    """Master grammar checking function, fusing multiple tools and eliminating redundancy"""
 
     if not text_to_check.strip():
         return {"error": "Please enter some text."}
@@ -1244,25 +1246,26 @@ def master_grammar_check(text_to_check: str, selected_model_key: str,
     }
 
     try:
-        # 1. Transformer模型纠错（主要方法）
+        # 1. Transformer model correction (primary method)
         transformer_result = correct_grammar_hf(text_to_check, selected_model_key)
         transformer_result["original_text"] = text_to_check
 
-        # 2. 规则引擎检查（补充方法）
-        lt_errors = check_with_language_tool(text_to_check) if use_language_tool else []#no need
+        # 2. Rule engine checking (supplementary method)
+        # Smart selection: LanguageTool if available, otherwise backup_grammar_check
+        lt_errors = check_with_language_tool(text_to_check) if use_language_tool else []
         spell_errors = check_spelling_pyspell(text_to_check) if use_pyspellchecker else []
 
-        # 3. 智能融合和冗余消除
+        # 3. Intelligent fusion and redundancy elimination
         fusion_result = intelligent_feedback_fusion(transformer_result, lt_errors, spell_errors)
 
-        # 4. 生成最终建议
+        # 4. Generate final suggestions
         final_suggestions = create_final_suggestions(fusion_result)
 
-        # 5. 生成高亮数据
+        # 5. Generate highlighting data
         diff_highlight = get_highlighted_diff(text_to_check, transformer_result.get("corrected_text", text_to_check))
         error_highlight = map_language_tool_errors(text_to_check, fusion_result["filtered_lt_errors"])
 
-        # 组装结果
+        # Assemble results
         results.update({
             "primary_correction": transformer_result.get("corrected_text", text_to_check),
             "confidence": fusion_result["confidence_score"],
@@ -1283,19 +1286,19 @@ def master_grammar_check(text_to_check: str, selected_model_key: str,
         return results
 
     except Exception as e:
-        logger.error(f"主检查函数执行失败: {e}")
+        logger.error(f"Main checking function execution failed: {e}")
         return {
-            "error": f"检查失败: {str(e)}",
+            "error": f"Check failed: {str(e)}",
             "original_text": text_to_check,
             "language_tool_status": "error"
         }
 
 
 def create_final_suggestions(fusion_result: Dict) -> List[Dict]:
-    """创建最终建议列表，优先级排序"""
+    """Create final suggestion list, sorted by priority"""
     suggestions = []
 
-    # 主要AI建议
+    # Primary AI suggestion
     transformer_result = fusion_result["transformer_result"]
     if transformer_result.get("changes_made"):
         suggestions.append({
@@ -1307,7 +1310,7 @@ def create_final_suggestions(fusion_result: Dict) -> List[Dict]:
             "source": "Neural Model"
         })
 
-    # 关键遗漏问题
+    # Critical missed issues
     for issue in fusion_result["missed_critical_issues"]:
         suggestions.append({
             "type": "critical",
@@ -1317,8 +1320,8 @@ def create_final_suggestions(fusion_result: Dict) -> List[Dict]:
             "source": f"Rule Engine ({issue['type']})"
         })
 
-    # 次要语法问题
-    for error in fusion_result["filtered_lt_errors"][:2]:  # 限制数量
+    # Minor grammar issues
+    for error in fusion_result["filtered_lt_errors"][:2]:  # Limit quantity
         if error["priority"] > 60:
             suggestions.append({
                 "type": "grammar",
@@ -1328,12 +1331,12 @@ def create_final_suggestions(fusion_result: Dict) -> List[Dict]:
                 "source": "Grammar Rules"
             })
 
-    return suggestions[:5]  # 最多5个建议
+    return suggestions[:5]  # Maximum 5 suggestions
 
 
-# --- 批量测试函数 ---
+# --- Batch Testing Functions ---
 def benchmark_all_models(test_sentences: List[str] = None):
-    """对所有模型进行性能基准测试"""
+    """Performance benchmark testing for all models"""
     if test_sentences is None:
         test_sentences = [
             "I has a bad grammer and I is very happy.",
@@ -1341,38 +1344,38 @@ def benchmark_all_models(test_sentences: List[str] = None):
             "This sentences has many mistakess. It a beautiful day.",
             "Their going to there house with they're friends.",
             "Me and him was walking to the store yesterday.",
-            "The students are reading their bootkass carefully."  # 添加bootkass测试
+            "The students are reading their bootkass carefully."  # Add bootkass test
         ]
 
-    print("=== 模型性能基准测试 ===")
+    print("=== Model Performance Benchmark Testing ===")
     results = {}
 
     for model_key in MODEL_OPTIONS.keys():
-        print(f"\n测试模型: {model_key}")
+        print(f"\nTesting model: {model_key}")
         model_results = []
 
         for i, sentence in enumerate(test_sentences, 1):
-            print(f"  测试句子 {i}: {sentence}")
+            print(f"  Test sentence {i}: {sentence}")
             result = correct_grammar_hf(sentence, model_key)
             model_results.append({
                 "input": sentence,
                 "output": result.get("corrected_text", "Error"),
                 "success": "error" not in result
             })
-            print(f"  结果: {result.get('corrected_text', 'Error')}")
+            print(f"  Result: {result.get('corrected_text', 'Error')}")
 
         results[model_key] = model_results
 
-        # 显示模型性能信息
+        # Display model performance information
         perf = MODEL_OPTIONS[model_key]["performance"]
-        print(f"  性能: {perf['accuracy']} | 速度: {perf['speed']} | 内存: {perf['memory']}")
+        print(f"  Performance: {perf['accuracy']} | Speed: {perf['speed']} | Memory: {perf['memory']}")
 
     return results
 
 
-# --- 专门测试bootkass修复的函数 ---
+# --- Specialized Function for Testing bootkass Corrections ---
 def test_bootkass_corrections():
-    """专门测试bootkass等明显错误的修复"""
+    """Specialized testing for obvious errors like 'bootkass'"""
     test_cases = [
         "The students in the classroom are reading their bootkass.",
         "I has a bad grammer and need to improve my writting skils.",
@@ -1382,41 +1385,122 @@ def test_bootkass_corrections():
         "The studients are in the clasroom with there techer."
     ]
 
-    print("=== 测试明显错误修复能力 ===")
-    print(f"LanguageTool状态: {'禁用' if DISABLE_LANGUAGE_TOOL else '启用'}")
-    print("使用增强的备用语法检查系统\n")
+    print("=== Testing Obvious Error Correction Capabilities ===")
+    print(f"LanguageTool status: {'Enabled' if not DISABLE_LANGUAGE_TOOL else 'Disabled'}")
+    if not DISABLE_LANGUAGE_TOOL:
+        print("Mode 3: LanguageTool + SpellChecker (Recommended)")
+        print("Will try LanguageTool first, fallback to backup if needed")
+    else:
+        print("Using backup grammar checking system only")
+    print("Both grammar checking and SpellChecker are enabled by default\n")
 
     for i, text in enumerate(test_cases, 1):
-        print(f"\n{i}. 测试: {text}")
+        print(f"\n{i}. Test: {text}")
 
-        result = master_grammar_check(text, "T5-Base (Vennify)")
+        # Mode 3: LanguageTool + SpellChecker (both enabled by default)
+        result = master_grammar_check(
+            text,
+            "T5-Base (Vennify)",
+            use_language_tool=True,  # LanguageTool/backup智能选择
+            use_pyspellchecker=True  # 拼写检查
+        )
 
         if "error" not in result:
-            print(f"   修正: {result['primary_correction']}")
-            print(f"   置信度: {result['confidence']}")
-            print(f"   改动: {'是' if result['stats']['transformer_changes'] else '否'}")
+            print(f"   Correction: {result['primary_correction']}")
+            print(f"   Confidence: {result['confidence']}")
+            print(f"   Changes made: {'Yes' if result['stats']['transformer_changes'] else 'No'}")
 
-            # 显示拼写建议
+            # Verify which grammar engine was used
+            if result.get('grammar_errors'):
+                print("   Grammar error detection:")
+                for error in result['grammar_errors'][:3]:
+                    rule_source = "LanguageTool" if not error['rule_id'].startswith('ENHANCED_') else "Backup"
+                    print(f"     [{rule_source}] {error['message']} (severity: {error['severity']})")
+
+            # Display spelling suggestions
             if result.get('spell_suggestions'):
-                print("   拼写建议:")
+                print("   Spelling suggestions:")
                 for suggestion in result['spell_suggestions'][:3]:
                     print(
-                        f"     {suggestion['word']} → {suggestion['correction']} (置信度: {suggestion['confidence']})")
-
-            # 显示语法错误
-            if result.get('grammar_errors'):
-                print("   语法错误检测:")
-                for error in result['grammar_errors'][:3]:
-                    print(f"     {error['message']} (严重程度: {error['severity']})")
+                        f"     {suggestion['word']} → {suggestion['correction']} (confidence: {suggestion['confidence']})")
         else:
-            print(f"   错误: {result['error']}")
+            print(f"   Error: {result['error']}")
 
-# 测试函数调用示例
+
+def verify_languagetool_setup():
+    """Verify if LanguageTool is working correctly"""
+    print("=== LanguageTool Setup Verification ===")
+
+    # Test 1: Check instance creation
+    lt_instance = get_language_tool_instance()
+    if lt_instance is not None:
+        print("✅ LanguageTool instance created successfully")
+
+        # Test 2: Check basic functionality
+        try:
+            test_text = "This are a test sentence."
+            matches = lt_instance.check(test_text)
+            if matches:
+                print(f"✅ LanguageTool detected {len(matches)} error(s) in test sentence")
+                for match in matches[:2]:  # Show first 2 errors
+                    print(f"   - {match.message} (Rule: {match.ruleId})")
+            else:
+                print("⚠️  LanguageTool didn't detect expected errors")
+        except Exception as e:
+            print(f"❌ LanguageTool check failed: {e}")
+            return False
+    else:
+        print("❌ LanguageTool instance creation failed")
+        return False
+
+    # Test 3: Check integration with our system
+    print("\n--- Integration Test ---")
+    test_integration_text = "I has many book and he don't like they."
+    result = master_grammar_check(test_integration_text, "T5-Base (Vennify)")
+
+    grammar_errors = result.get('grammar_errors', [])
+    languagetool_errors = [e for e in grammar_errors if not e['rule_id'].startswith('ENHANCED_')]
+    backup_errors = [e for e in grammar_errors if e['rule_id'].startswith('ENHANCED_')]
+
+    print(f"Grammar errors found: {len(grammar_errors)}")
+    print(f"  - LanguageTool errors: {len(languagetool_errors)}")
+    print(f"  - Backup errors: {len(backup_errors)}")
+
+    if languagetool_errors:
+        print("✅ LanguageTool integration working")
+        for error in languagetool_errors[:2]:
+            print(f"   LT: {error['message']} (Rule: {error['rule_id']})")
+    else:
+        print("⚠️  No LanguageTool errors detected - may be using backup only")
+
+    return True
+
+
+# Test function call example
 if __name__ == "__main__":
-    # 测试bootkass等错误修复
-    test_bootkass_corrections()
+    # Configuration options demonstration
+    print("=== Configuration: Mode 3 (LanguageTool + SpellChecker) ===")
+    print(f"Current setting: DISABLE_LANGUAGE_TOOL = {DISABLE_LANGUAGE_TOOL}")
+    print("Mode 3 Configuration:")
+    print("- LanguageTool: Enabled (primary grammar checking)")
+    print("- SpellChecker: Enabled (pyspellchecker)")
+    print("- Backup Grammar: Available as fallback")
+    print("- AI Model: T5/BART for main corrections")
+    print("\n")
 
-    # 原有的批量测试
-    print("\n" + "=" * 50)
-    benchmark_results = benchmark_all_models()
-    print("模型基准测试完成")
+    # Verify LanguageTool setup first
+    setup_success = verify_languagetool_setup()
+
+    if setup_success:
+        print("\n" + "=" * 50)
+        # Test bootkass and other error corrections
+        test_bootkass_corrections()
+
+        print("\n" + "=" * 50)
+        # Original batch testing
+        benchmark_results = benchmark_all_models()
+        print("Model benchmark testing completed")
+    else:
+        print("❌ LanguageTool setup verification failed. Please check installation:")
+        print("   pip install language-tool-python")
+        print("   or set DISABLE_LANGUAGE_TOOL = True to use backup only")

@@ -45,7 +45,7 @@ class GrammarCorrectionDataset(Dataset):
         This is for 'agentlans/grammar-correction' which uses 'input' and 'output'.
         """
         example['sentence'] = example.get('input', '')  # 原始文本列
-        example['parsed_correction'] = example.get('output', '') # 纠正后文本列
+        example['parsed_correction'] = example.get('output', '') #
         return example
 
     def __len__(self):
