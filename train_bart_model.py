@@ -171,10 +171,6 @@ def train_grammar_model(hf_dataset_name="agentlans/grammar-correction", model_na
 if __name__ == "__main__":
     HF_DATASET_NAME = "agentlans/grammar-correction"
     MODEL_TO_FINETUNE = "facebook/bart-base"
-    # 根据本地或 Colab 调整输出目录
-    # 在本地运行时，可以设置为当前目录下的子文件夹
-    # 在 Colab 运行时，通常设置为 /content/drive/MyDrive/ 以便保存到 Google Drive
-    # 建议在运行前根据实际环境手动修改此行
     FINE_TUNED_MODEL_DIR = "./finetuned_bart_model_agentlans_local" # 本地默认目录，Colab需修改
 
     train_grammar_model(
@@ -182,6 +178,6 @@ if __name__ == "__main__":
         model_name=MODEL_TO_FINETUNE,
         output_dir=FINE_TUNED_MODEL_DIR
     )
-
+# AUC, F1 scores,  and other metrics can be added to the training loop for model evaluation.
     logger.info(f"\n训练过程完成。你的微调模型保存在: {FINE_TUNED_MODEL_DIR}")
     logger.info("现在，更新你的 model.py 以便加载这个新模型进行推理。")

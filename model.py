@@ -309,7 +309,7 @@ def correct_grammar_hf(text: str, model_key: str) -> Dict:
 
 
 def preprocess_text(text: str) -> str:
-    """增强的文本预处理"""
+    """文本预处理"""
     if not text.strip():
         return text
 
@@ -322,7 +322,6 @@ def preprocess_text(text: str) -> str:
 
     # 修复常见的大小写错误
     text = re.sub(r'\bi\s+([a-z])', r'I \1', text)  # "i" -> "I"
-
     # 修复常见的缩写错误
     text = re.sub(r'\bdont\b', "don't", text, flags=re.IGNORECASE)
     text = re.sub(r'\bcant\b', "can't", text, flags=re.IGNORECASE)
@@ -500,116 +499,125 @@ def check_with_language_tool(text: str) -> List[Dict]:
     return backup_grammar_check(text)
 
 def backup_grammar_check(text: str) -> List[Dict]:
-    """增强的语法检查，替代LanguageTool"""
+    """Enhanced grammar checking, alternative to LanguageTool"""
     errors = []
 
-    # 扩展的语法规则库
+    # Extended grammar rules
     grammar_rules = [
-        # 主谓一致错误
+        # Subject-Verb Agreement Errors
         {
             "pattern": r'\bi\s+(?:has|was|does|is)\b',
-            "message": "主谓不一致: 'I' 应该使用 have/were/do/am",
+            "message": "Subject-verb disagreement: 'I' should use have/were/do/am",
             "replacement_func": lambda m: re.sub(r'\b(has|was|does|is)\b',
                                                  {'has': 'have', 'was': 'were', 'does': 'do', 'is': 'am'}[m.group(1)],
                                                  m.group()),
             "severity": "High",
             "error_type": "Grammar"
         },
-        # 直接在 grammar_rules 里加：
+        {
+            "pattern": r'\bi\s+(?:has|was|does|is)\b',
+            "message": "Subject-verb disagreement: 'He' should use hasn't/doesn't/isn't",
+            "replacement_func": lambda m: re.sub(r'\b(dont|isnot|have)\b',
+                                                 {"dont":'doesnt','isnot':'isn'}[m.group(1)],
+                                                 m.group()),
+            "severity": "High",
+            "error_type": "Grammar"
+        },
+        # Direct addition to grammar_rules:
         {
             "pattern": r'\bme and (him|her|them)\b',
-            "message": " 'I and him', 'I and her' 等。",
-            "replacement_func": lambda m: "He and I" if m.group(1) == "him" else "She and I",
+            "message": "Pronoun order/case: Use 'I and he/she/they' (or 'He and I', 'She and I' for better flow).",
+            "replacement_func": lambda m: "He and I" if m.group(1) == "him" else ("She and I" if m.group(1) == "her" else "They and I"),
             "severity": "High",
             "error_type": "Grammar"
         },
         {
             "pattern": r'\b(?:he|she|it)\s+(?:have|were|do|are)\b',
-            "message": "主谓不一致: 第三人称单数应该使用 has/was/does/is",
+            "message": "Subject-verb disagreement: Third person singular should use has/was/does/is",
             "replacement_func": lambda m: re.sub(r'\b(have|were|do|are)\b',
                                                  {'have': 'has', 'were': 'was', 'do': 'does', 'are': 'is'}[m.group(1)],
                                                  m.group()),
             "severity": "High",
             "error_type": "Grammar"
         },
-        # 动词时态错误
+        # Verb Tense Errors
         {
             "pattern": r'\b(?:yesterday|last\s+\w+)\s+.*?\b\w+ing\b',
-            "message": "时态错误: 过去时间状语通常不与进行时连用",
+            "message": "Tense error: Past time adverbs are typically not used with progressive tense",
             "replacement_func": None,
             "severity": "Medium",
             "error_type": "Grammar"
         },
-        # 词汇混淆
+        # Confused Words
         {
             "pattern": r'\btheir\s+(?:going|coming|leaving)\b',
-            "message": "词汇错误: 'their' 应该是 'they're' (they are)",
+            "message": "Lexical error: 'their' should be 'they\'re' (they are)",
             "replacement_func": lambda m: m.group().replace('their', "they're"),
             "severity": "High",
             "error_type": "Grammar"
         },
         {
             "pattern": r'\bthere\s+(?:house|car|book|friend)\b',
-            "message": "词汇错误: 'there' 应该是 'their' (所有格)",
+            "message": "Lexical error: 'there' should be 'their' (possessive)",
             "replacement_func": lambda m: m.group().replace('there', 'their'),
             "severity": "High",
             "error_type": "Grammar"
         },
-        # 冠词错误
+        # Article Errors
         {
             "pattern": r'\ba\s+[aeiouAEIOU]\w+\b',
-            "message": "冠词错误: 元音开头的词前应使用 'an'",
+            "message": "Article error: 'an' should be used before a word starting with a vowel sound",
             "replacement_func": lambda m: m.group().replace('a ', 'an ', 1),
             "severity": "Medium",
             "error_type": "Grammar"
         },
         {
             "pattern": r'\ban\s+[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]\w+\b',
-            "message": "冠词错误: 辅音开头的词前应使用 'a'",
+            "message": "Article error: 'a' should be used before a word starting with a consonant sound",
             "replacement_func": lambda m: m.group().replace('an ', 'a ', 1),
             "severity": "Medium",
             "error_type": "Grammar"
         },
-        # 常见拼写和语法混合错误
+        # Common Spelling and Punctuation Errors
         {
             "pattern": r'\bdont\b',
-            "message": "缺少撇号: 'dont' 应该是 'don't'",
+            "message": "Missing apostrophe: 'dont' should be 'don\'t'",
             "replacement_func": lambda m: "don't",
             "severity": "High",
             "error_type": "Punctuation"
         },
         {
             "pattern": r'\bcant\b',
-            "message": "缺少撇号: 'cant' 应该是 'can't'",
+            "message": "Missing apostrophe: 'cant' should be 'can\'t'",
             "replacement_func": lambda m: "can't",
             "severity": "High",
             "error_type": "Punctuation"
         },
         {
             "pattern": r'\bwont\b',
-            "message": "缺少撇号: 'wont' 应该是 'won't'",
+            "message": "Missing apostrophe: 'wont' should be 'won\'t'",
             "replacement_func": lambda m: "won't",
             "severity": "High",
             "error_type": "Punctuation"
         },
-        # 复数形式错误
+        # Plural Form Errors
         {
             "pattern": r'\b(?:this|that)\s+\w+s\b',
-            "message": "单复数不一致: 'this/that' 后应接单数名词",
+            "message": "Singular/plural mismatch: 'this/that' should be followed by a singular noun",
             "replacement_func": None,
             "severity": "Medium",
             "error_type": "Grammar"
         },
         {
             "pattern": r'\b(?:these|those)\s+\w+[^s]\b(?!\w)',
-            "message": "单复数不一致: 'these/those' 后应接复数名词",
+            "message": "Singular/plural mismatch: 'these/those' should be followed by a plural noun",
             "replacement_func": None,
             "severity": "Medium",
             "error_type": "Grammar"
         }
     ]
 
-    # 应用所有规则
+    # Apply all rules
     for rule in grammar_rules:
         matches = list(re.finditer(rule["pattern"], text, re.IGNORECASE))
         for match in matches:
@@ -626,7 +634,7 @@ def backup_grammar_check(text: str) -> List[Dict]:
                 "priority": {"High": 100, "Medium": 60, "Low": 30}[rule["severity"]]
             }
 
-            # 生成建议的修正
+            # Generate suggested correction
             if rule["replacement_func"]:
                 try:
                     replacement = rule["replacement_func"](match)
@@ -638,7 +646,7 @@ def backup_grammar_check(text: str) -> List[Dict]:
 
             errors.append(error_dict)
 
-    # 检查句子结构问题
+    # Check for sentence structure issues
     sentence_errors = check_sentence_structure(text)
     errors.extend(sentence_errors)
 
@@ -646,10 +654,10 @@ def backup_grammar_check(text: str) -> List[Dict]:
 def should_skip_error(match) -> bool:
     """过滤低价值错误"""
     skip_rules = [
-        "WHITESPACE_RULE",  # 空格问题
-        "WORD_CONTAINS_UNDERSCORE",  # 下划线
-        "EN_QUOTES",  # 引号样式
-        "CURRENCY"  # 货币格式
+        "WHITESPACE_RULE",
+        "WORD_CONTAINS_UNDERSCORE",
+        "EN_QUOTES",
+        "CURRENCY"
     ]
 
     skip_categories = ["TYPOS"]  # 纯拼写错误（由拼写检查器处理）
@@ -1224,7 +1232,7 @@ def map_language_tool_errors(text: str, errors: List[Dict]) -> List[Tuple]:
 
 # --- 主控制函数 ---
 def master_grammar_check(text_to_check: str, selected_model_key: str,
-                         use_language_tool: bool = True, use_pyspellchecker: bool = True) -> Dict:
+                         use_language_tool: bool = False, use_pyspellchecker: bool = True) -> Dict:
 
     if not text_to_check.strip():
         return {"error": "Please enter some text."}

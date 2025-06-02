@@ -222,10 +222,7 @@ def build_ui():
         clear_btn.click(lambda: ("", "Word count: 0"), outputs=[txt, live])
 
         # Extra buttons (footer)
-        with gr.Row():
-            gr.Button("Bootkass Test").click(lambda: test_bootkass_corrections() or "Bootkass test completed! Check console.", outputs=summary)
-            gr.Button("Reset Stats").click(lambda: (STATS.reset() or "Statistics reset."), outputs=summary).then(lambda: STATS.markdown(), outputs=stats_md)
-    return gui
+        return gui
 
 
 if __name__ == "__main__":
