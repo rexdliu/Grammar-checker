@@ -63,75 +63,31 @@ MODEL_OPTIONS = {
             "weaknesses": "复杂句式重构能力有限"
         }
     },
-
-    "Coedit-Large (Grammarly)": {
-        "name": "grammarly/coedit-large",
-        "prefix": "Fix the grammar: ",
-        "model_type": "T5ForConditionalGeneration",
-        "params": {
-            "max_length": 512,
-            "num_beams": 4,
-            "early_stopping": True,
-            "no_repeat_ngram_size": 2,
-            "repetition_penalty": 1.0,
-            "length_penalty": 1.0,
-            "do_sample": True,
-            "temperature": 0.3
-        },
-        "performance": {
-            "accuracy": "Very High",
-            "speed": "Medium",
-            "memory": "~6GB",
-            "strengths": "复杂语法错误，指令理解，语义保持",
-            "weaknesses": "资源消耗大，推理较慢"
-        }
-    },
-
-    "FLAN-T5-Large (Pszemraj)": {
-        "name": "pszemraj/flan-t5-large-grammar-synthesis",
-        "prefix": "grammar: ",
-        "model_type": "AutoModelForSeq2SeqLM",
-        "params": {
-            "max_length": 512,
-            "num_beams": 4,
-            "early_stopping": True,
-            "no_repeat_ngram_size": 2,
-            "repetition_penalty": 1.0,
-            "length_penalty": 0.8,
-            "do_sample": True,
-            "temperature": 0.7
-        },
-        "performance": {
-            "accuracy": "Very High",
-            "speed": "Slow",
-            "memory": "~5GB",
-            "strengths": "单次全文纠错，语义完整性，高质量输出",
-            "weaknesses": "大文本处理时间长"
-        }
-    },
-
-    "Error Corrector v1 (Prithivida)": {
-        "name": "prithivida/grammar_error_correcter_v1",
+    # --- 你的微调 BART ---
+    "My BART Fine-tuned": {
+        "name": "finetuned_bart_model_agentlans_local",
+        # BART 训练时没用前缀，就留空
         "prefix": "",
         "model_type": "AutoModelForSeq2SeqLM",
-        "params": {
-            "max_length": 128,
-            "num_beams": 3,
+        "params": {                # 推理时的生成参数，可先沿用 T5 的
+            "max_length": 128,     # 训练时就是 128
+            "num_beams": 4,
             "early_stopping": True,
-            "no_repeat_ngram_size": 2,
-            "repetition_penalty": 1.0,
+            "no_repeat_ngram_size": 3,
+            "repetition_penalty": 1.05,
             "length_penalty": 1.0,
             "do_sample": False
         },
-        "performance": {
-            "accuracy": "Medium",
-            "speed": "Very Fast",
-            "memory": "~1GB",
-            "strengths": "轻量化，快速处理，低资源消耗",
-            "weaknesses": "复杂错误处理能力有限"
+        "performance": {           # 纯备注，可随意写
+            "accuracy": "Fine-tuned",
+            "speed": "Fast",
+            "memory": "~2.5GB",
+            "strengths": "In-domain corrections",
+            "weaknesses": "May overfit small set"
         }
     }
 }
+
 
 # --- 全局实例管理 ---
 _language_tool_instance = None
@@ -1266,10 +1222,9 @@ def map_language_tool_errors(text: str, errors: List[Dict]) -> List[Tuple]:
     return highlighted_parts
 
 
-# --- 更新主控制函数 ---
+# --- 主控制函数 ---
 def master_grammar_check(text_to_check: str, selected_model_key: str,
                          use_language_tool: bool = True, use_pyspellchecker: bool = True) -> Dict:
-    """智能语法检查主函数，融合多种工具并消除冗余"""
 
     if not text_to_check.strip():
         return {"error": "Please enter some text."}
@@ -1286,7 +1241,7 @@ def master_grammar_check(text_to_check: str, selected_model_key: str,
         transformer_result["original_text"] = text_to_check
 
         # 2. 规则引擎检查（补充方法）
-        lt_errors = check_with_language_tool(text_to_check) if use_language_tool else []
+        lt_errors = check_with_language_tool(text_to_check) if use_language_tool else []#no need
         spell_errors = check_spelling_pyspell(text_to_check) if use_pyspellchecker else []
 
         # 3. 智能融合和冗余消除

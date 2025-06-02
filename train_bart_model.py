@@ -1,16 +1,18 @@
-# train_bart_model.py
-
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, TrainingArguments, Trainer
-from datasets import load_dataset
+from datasets import load_dataset, Dataset as HFDataset # Keep HFDataset import for potential future use or clarity
 import os
 import logging
+import sys
 
 # Set up basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
+# Configure logging for datasets library (optional, but good for debugging)
+datasets_logger = logging.getLogger("datasets")
+datasets_logger.setLevel(logging.DEBUG)
 
 # --- 1. 数据准备 (GrammarCorrectionDataset) ---
 class GrammarCorrectionDataset(Dataset):
@@ -19,35 +21,31 @@ class GrammarCorrectionDataset(Dataset):
         self.max_len = max_len
         self.hf_dataset = hf_dataset
 
-        logger.info("Preprocessing dataset: selecting first correction and filtering empty entries...")
+        logger.info("Preprocessing dataset: mapping column names and filtering empty entries...")
         processed_dataset = self.hf_dataset.map(
             self._preprocess_example,
             num_proc=os.cpu_count() // 2 or 1,
-            load_from_cache_file=False  # Keep False during debugging
+            load_from_cache_file=False # Keep False during debugging
         )
 
         initial_filtered_count = len(processed_dataset)
-        logger.info(f"Initial samples after selecting first correction: {initial_filtered_count}")
+        logger.info(f"Initial samples after column mapping: {initial_filtered_count}")
 
+        # Filter out examples where either 'sentence' or 'parsed_correction' is empty
         self.hf_dataset = processed_dataset.filter(
             lambda example: example.get('sentence') is not None and len(str(example['sentence']).strip()) > 0 and \
-                            example.get('parsed_correction') is not None and len(
-                str(example['parsed_correction']).strip()) > 0
+                            example.get('parsed_correction') is not None and len(str(example['parsed_correction']).strip()) > 0
         )
         logger.info(f"Dataset preprocessed. Remaining samples after filtering: {len(self.hf_dataset)}")
 
+
     def _preprocess_example(self, example):
-        """Helper function to extract the first correction from the list."""
-        parsed_correction = ""
-        # The 'corrections' column is already a list of strings
-        corrections_list = example.get('corrections', [])  # Default to empty list if column is missing
-
-        if corrections_list and isinstance(corrections_list, list) and len(corrections_list) > 0:
-            parsed_correction = str(corrections_list[0])  # Take the first correction
-        else:
-            logger.debug(f"Corrections list was empty or not a list for example: {example.get('sentence', '')[:50]}...")
-
-        example['parsed_correction'] = parsed_correction
+        """
+        Helper function to map dataset column names to internal 'sentence' and 'parsed_correction'.
+        This is for 'agentlans/grammar-correction' which uses 'input' and 'output'.
+        """
+        example['sentence'] = example.get('input', '')  # 原始文本列
+        example['parsed_correction'] = example.get('output', '') # 纠正后文本列
         return example
 
     def __len__(self):
@@ -81,53 +79,68 @@ class GrammarCorrectionDataset(Dataset):
         }
 
 
-def train_grammar_model(hf_dataset_path="Prajapat/Grammer_Correction_train", model_name="facebook/bart-base",
-                        output_dir="./finetuned_bart_grammar_model"):
+def train_grammar_model(hf_dataset_name="agentlans/grammar-correction", model_name="facebook/bart-base", output_dir="./finetuned_bart_grammar_model"):
     logger.info(f"Loading tokenizer and model: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
-    logger.info(f"Loading dataset from Hugging Face Hub: {hf_dataset_path}")
-    hf_dataset = load_dataset(hf_dataset_path, split='train')
+    logger.info(f"Loading dataset from Hugging Face Hub: {hf_dataset_name}")
+    try:
+        ds = load_dataset(hf_dataset_name)
+        logger.info(f"Dataset {hf_dataset_name} loaded successfully from the Hub.")
+    except Exception as e:
+        logger.error(f"Failed to load dataset {hf_dataset_name} from the Hub. Please verify the dataset name and your internet connection.")
+        logger.error(f"Error details: {e}")
+        # 保留这个提示，以防万一
+        if "Invalid pattern: '**' can only be an entire path component" in str(e):
+             logger.warning("This error often indicates an issue with the dataset's file structure or fsspec. Trying an alternative dataset loader or upgrading libraries might help.")
+             logger.warning("Please ensure your 'datasets' library is updated to the latest version.")
+        raise # Re-raise the exception to stop execution
 
-    logger.info(f"Original dataset size from Hugging Face Hub: {len(hf_dataset)}")
 
-    full_dataset = GrammarCorrectionDataset(tokenizer, hf_dataset)
-
-    logger.info(f"Final dataset size after all preprocessing and filtering: {len(full_dataset)}")
-
-    if len(full_dataset) == 0:
-        logger.error(
-            "Dataset is empty after preprocessing and filtering. Cannot train model. Please check your data or preprocessing logic.")
+    # Access the specific splits
+    if 'train' not in ds:
+        logger.error(f"Dataset {hf_dataset_name} does not contain a 'train' split.")
+        return
+    if 'validation' not in ds:
+        logger.error(f"Dataset {hf_dataset_name} does not contain a 'validation' split.")
         return
 
-    train_size = int(0.9 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+    hf_train_dataset_raw = ds['train']
+    hf_val_dataset_raw = ds['validation']
 
-    if train_size == 0 and len(full_dataset) > 0:
-        train_size = 1
-        val_size = len(full_dataset) - 1
-    if val_size == 0 and len(full_dataset) > 0 and train_size == 0:
-        val_size = 1
-        train_size = len(full_dataset) - 1
-    if train_size < 0 or val_size < 0:
-        logger.error("Error: Negative dataset split size. Something is wrong with dataset splitting.")
+    logger.info(f"Original train dataset size from Hub: {len(hf_train_dataset_raw)}")
+    logger.info(f"Original validation dataset size from Hub: {len(hf_val_dataset_raw)}")
+
+    # Initialize GrammarCorrectionDataset for both train and validation splits
+    full_train_dataset = GrammarCorrectionDataset(tokenizer, hf_train_dataset_raw)
+    full_val_dataset = GrammarCorrectionDataset(tokenizer, hf_val_dataset_raw)
+
+    logger.info(f"Final training dataset size after all preprocessing and filtering: {len(full_train_dataset)}")
+    logger.info(f"Final validation dataset size after all preprocessing and filtering: {len(full_val_dataset)}")
+
+
+    if len(full_train_dataset) == 0:
+        logger.error("Training dataset is empty after preprocessing and filtering. Cannot train model. Please check your data or preprocessing logic.")
+        return
+    if len(full_val_dataset) == 0:
+        logger.error("Validation dataset is empty after preprocessing and filtering. Cannot train model. Please check your data or preprocessing logic.")
         return
 
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-
-    logger.info(f"Training samples: {len(train_dataset)}, Validation samples: {len(val_dataset)}")
+    # Use the preprocessed datasets directly
+    train_dataset = full_train_dataset
+    val_dataset = full_val_dataset
 
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=5,
+        num_train_epochs=3,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
         warmup_steps=500,
         weight_decay=0.01,
         logging_dir='./logs',
         logging_steps=50,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
@@ -155,14 +168,17 @@ def train_grammar_model(hf_dataset_path="Prajapat/Grammer_Correction_train", mod
     tokenizer.save_pretrained(output_dir)
     logger.info("Model and tokenizer saved.")
 
-
 if __name__ == "__main__":
-    HF_DATASET_NAME = "Prajapat/Grammer_Correction_train"
+    HF_DATASET_NAME = "agentlans/grammar-correction"
     MODEL_TO_FINETUNE = "facebook/bart-base"
-    FINE_TUNED_MODEL_DIR = f"./finetuned_{MODEL_TO_FINETUNE.replace('/', '_')}_grammar_model"
+    # 根据本地或 Colab 调整输出目录
+    # 在本地运行时，可以设置为当前目录下的子文件夹
+    # 在 Colab 运行时，通常设置为 /content/drive/MyDrive/ 以便保存到 Google Drive
+    # 建议在运行前根据实际环境手动修改此行
+    FINE_TUNED_MODEL_DIR = "./finetuned_bart_model_agentlans_local" # 本地默认目录，Colab需修改
 
     train_grammar_model(
-        hf_dataset_path=HF_DATASET_NAME,
+        hf_dataset_name=HF_DATASET_NAME,
         model_name=MODEL_TO_FINETUNE,
         output_dir=FINE_TUNED_MODEL_DIR
     )
